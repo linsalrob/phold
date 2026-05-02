@@ -1714,5 +1714,31 @@ def main():
     main_cli()
 
 
+def main_xpu():
+    status = 0
+
+    try:
+        result = main()
+        status = int(result) if result is not None else 0
+
+    except SystemExit as e:
+        if e.code is None:
+            status = 0
+        elif isinstance(e.code, int):
+            status = e.code
+        else:
+            print(e.code, file=sys.stderr)
+            status = 1
+
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        status = 1
+
+    finally:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(status)
+
 if __name__ == "__main__":
     main()
