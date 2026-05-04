@@ -6,6 +6,8 @@ Also used by a variety of other tools (Dnaapler, Plassembler, Pharokka)
 """
 
 import hashlib
+import os
+import signal
 import shlex
 import subprocess
 import sys
@@ -76,8 +78,45 @@ class ExternalTool:
                 raise subprocess.CalledProcessError(return_code, self.command)
 
     @staticmethod
-    def _run_core(command: List[str], stdout_fh, stderr_fh) -> None:
-        subprocess.check_call(command, stdout=stdout_fh, stderr=stderr_fh)
+    def _run_core(command: List[str], stdout_fh, stderr_fh, timeout: int = 3600) -> None:
+        """
+        Run an external command with a timeout.
+
+        This avoids Phold hanging indefinitely if an external tool, particularly
+        GPU-enabled Foldseek, wedges or fails to return control to Python.
+
+        The child process is started in its own process group so that any
+        subprocesses it spawns can also be terminated on timeout.
+        """
+        process = subprocess.Popen(
+            command,
+            stdout=stdout_fh,
+            stderr=stderr_fh,
+            start_new_session=True,
+        )
+
+        try:
+            return_code = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            print(
+                f"Command timed out after {timeout} seconds: {shlex.join(command)}",
+                file=stderr_fh,
+                flush=True,
+            )
+
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+                process.wait(timeout=30)
+            except Exception:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except Exception:
+                    pass
+
+            raise
+
+        if return_code != 0:
+            raise subprocess.CalledProcessError(return_code, command)
 
     @staticmethod
     def run_tools(
@@ -99,7 +138,21 @@ class ExternalTool:
                     ctx.exit(1)
                 else:
                     sys.exit(1)
+            except subprocess.TimeoutExpired as error:
+                logger.error(
+                    f"Timeout calling {tool.command_as_str} "
+                    f"after {error.timeout} seconds"
+                )
+                logger.error(f"Please check stdout log file: {tool.out_log}")
+                logger.error(f"Please check stderr log file: {tool.err_log}")
+                logger.error("Temporary files are preserved for debugging")
+                logger.error("Exiting...")
 
+                if ctx:
+                    ctx.exit(1)
+                else:
+                    sys.exit(1)
+    
     """
     Only one toolf
     """
@@ -111,6 +164,20 @@ class ExternalTool:
         except subprocess.CalledProcessError as error:
             logger.error(
                 f"Error calling {tool.command_as_str} (return code {error.returncode})"
+            )
+            logger.error(f"Please check stdout log file: {tool.out_log}")
+            logger.error(f"Please check stderr log file: {tool.err_log}")
+            logger.error("Temporary files are preserved for debugging")
+            logger.error("Exiting...")
+
+            if ctx:
+                ctx.exit(1)
+            else:
+                sys.exit(1)
+        except subprocess.TimeoutExpired as error:
+            logger.error(
+                f"Timeout calling {tool.command_as_str} "
+                f"after {error.timeout} seconds"
             )
             logger.error(f"Please check stdout log file: {tool.out_log}")
             logger.error(f"Please check stderr log file: {tool.err_log}")
