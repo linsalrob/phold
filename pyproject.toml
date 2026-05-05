@@ -57,6 +57,7 @@ dependencies = [
 [project.scripts]
 phold = 'phold:main'
 phold-xpu = "phold:main_xpu"
+phold-xpu-cli = "phold.xpu_cli:main"
 
 [project.urls]
 "Homepage" = "https://github.com/gbouras13/phold"
